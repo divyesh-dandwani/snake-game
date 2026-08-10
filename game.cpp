@@ -3,13 +3,14 @@
 #include <vector>
 #include <cstdlib>
 #include <ctime>
-#include <unistd.h>
-#include <termios.h>
-#include <sys/select.h>
-#include <fcntl.h>
+#include <windows.h>
+#include <conio.h>
 #include <fstream>
-#include <sys/ioctl.h>
 #include <sstream>
+
+#ifndef ENABLE_VIRTUAL_TERMINAL_PROCESSING
+#define ENABLE_VIRTUAL_TERMINAL_PROCESSING 0x0004
+#endif
 using namespace std;
 
 // ============ Sound System ============
@@ -26,7 +27,7 @@ public:
         else if (event == "powerup")
         {
             cout << "\a" << flush;
-            usleep(50000);
+            Sleep(50);
             cout << "\a" << flush; // Double beep for powerup
         }
         else if (event == "gameover")
@@ -34,7 +35,7 @@ public:
             for (int i = 0; i < 3; ++i)
             {
                 cout << "\a" << flush;
-                usleep(100000);
+                Sleep(100);
             }
         }
         else if (event == "collision")
@@ -481,7 +482,7 @@ private:
     int baseSpeed;
     int currentSpeed;
     bool gameOver;
-    struct termios oldt, newt;
+    DWORD oldOutMode;
     HighScoreManager highScoreManager;
     vector<string> screenBuffer;
     vector<string> previousBuffer;
@@ -494,30 +495,27 @@ private:
 
     void setupTerminal()
     {
-        tcgetattr(STDIN_FILENO, &oldt);
-        newt = oldt;
-        newt.c_lflag &= ~(ICANON | ECHO);
-        tcsetattr(STDIN_FILENO, TCSANOW, &newt);
-
-        int flags = fcntl(STDIN_FILENO, F_GETFL, 0);
-        fcntl(STDIN_FILENO, F_SETFL, flags | O_NONBLOCK);
+        HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+        GetConsoleMode(hOut, &oldOutMode);
+        DWORD dwMode = oldOutMode | ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+        SetConsoleMode(hOut, dwMode);
     }
 
     void restoreTerminal()
     {
-        tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
-
-        int flags = fcntl(STDIN_FILENO, F_GETFL, 0);
-        fcntl(STDIN_FILENO, F_SETFL, flags & ~O_NONBLOCK);
+        HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+        SetConsoleMode(hOut, oldOutMode);
     }
 
     void getTerminalSize()
     {
-        struct winsize w;
-        ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
+        CONSOLE_SCREEN_BUFFER_INFO csbi;
+        GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &csbi);
+        int columns = csbi.srWindow.Right - csbi.srWindow.Left + 1;
+        int rows = csbi.srWindow.Bottom - csbi.srWindow.Top + 1;
 
-        WIDTH = min(60, (int)w.ws_col - 4);
-        HEIGHT = min(30, (int)w.ws_row - 10);
+        WIDTH = min(60, columns - 4);
+        HEIGHT = min(30, rows - 10);
 
         if (WIDTH < 20)
             WIDTH = 20;
@@ -683,32 +681,20 @@ private:
 
     char getInput()
     {
-        char c = 0;
-        read(STDIN_FILENO, &c, 1);
-
-        if (c == 27)
+        if (_kbhit())
         {
-            char seq[2];
-            if (read(STDIN_FILENO, &seq[0], 1) == 1)
+            int c = _getch();
+            if (c == 0 || c == 224)
             {
-                if (seq[0] == '[')
-                {
-                    if (read(STDIN_FILENO, &seq[1], 1) == 1)
-                    {
-                        if (seq[1] == 'A')
-                            return 'w';
-                        if (seq[1] == 'B')
-                            return 's';
-                        if (seq[1] == 'C')
-                            return 'd';
-                        if (seq[1] == 'D')
-                            return 'a';
-                    }
-                }
+                int ext = _getch();
+                if (ext == 72) return 'w';
+                if (ext == 80) return 's';
+                if (ext == 77) return 'd';
+                if (ext == 75) return 'a';
             }
+            return (char)c;
         }
-
-        return c;
+        return 0;
     }
 
     void processInput(char input)
@@ -932,7 +918,7 @@ public:
 
             while (getInput() == 0)
             {
-                usleep(10000);
+                Sleep(10);
             }
 
             initializeBuffer();
@@ -979,7 +965,7 @@ public:
                     }
                 }
 
-                usleep(currentSpeed);
+                Sleep(currentSpeed / 1000);
             }
 
             highScoreManager.saveHighScore(score);
@@ -1001,7 +987,7 @@ public:
             while (choice != 'r' && choice != 'R' && choice != 'q' && choice != 'Q')
             {
                 choice = getInput();
-                usleep(10000);
+                Sleep(10);
             }
 
             if (choice == 'q' || choice == 'Q')
