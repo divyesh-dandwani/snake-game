@@ -705,13 +705,13 @@ private:
                     if (read(STDIN_FILENO, &seq[1], 1) == 1)
                     {
                         if (seq[1] == 'A')
-                            return 'w';
+                            return '^';
                         if (seq[1] == 'B')
-                            return 's';
+                            return 'v';
                         if (seq[1] == 'C')
-                            return 'd';
+                            return '>';
                         if (seq[1] == 'D')
-                            return 'a';
+                            return '<';
                     }
                 }
             }
@@ -725,22 +725,38 @@ private:
         if (players.empty()) return;
         switch (input)
         {
+        // Player 1 (Arrow Keys)
+        case '^':
+            players[0].snake->setDirection(0, -1);
+            break;
+        case 'v':
+            players[0].snake->setDirection(0, 1);
+            break;
+        case '<':
+            players[0].snake->setDirection(-1, 0);
+            break;
+        case '>':
+            players[0].snake->setDirection(1, 0);
+            break;
+            
+        // Player 2 (WASD)
         case 'w':
         case 'W':
-            players[0].snake->setDirection(0, -1);
+            if (players.size() > 1) players[1].snake->setDirection(0, -1);
             break;
         case 's':
         case 'S':
-            players[0].snake->setDirection(0, 1);
+            if (players.size() > 1) players[1].snake->setDirection(0, 1);
             break;
         case 'a':
         case 'A':
-            players[0].snake->setDirection(-1, 0);
+            if (players.size() > 1) players[1].snake->setDirection(-1, 0);
             break;
         case 'd':
         case 'D':
-            players[0].snake->setDirection(1, 0);
+            if (players.size() > 1) players[1].snake->setDirection(1, 0);
             break;
+            
         case 'q':
         case 'Q':
             gameOver = true;
@@ -909,9 +925,11 @@ public:
             players.clear();
             
             // Refactored: the number of snakes is controlled here
-            int numPlayers = 1; 
+            int numPlayers = 2; 
             for (int i = 0; i < numPlayers; ++i) {
-                players.push_back({new Snake(WIDTH / 2, HEIGHT / 2), 0});
+                // Different start positions for different players
+                int startX = (i == 0) ? (3 * WIDTH / 4) : (WIDTH / 4);
+                players.push_back({new Snake(startX, HEIGHT / 2), 0});
             }
 
             gameOver = false;
