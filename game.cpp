@@ -473,11 +473,14 @@ class Game
 private:
     int WIDTH;
     int HEIGHT;
-    Snake *snake;
+    struct PlayerState {
+        Snake* snake;
+        int score;
+    };
+    vector<PlayerState> players;
     FoodManager foodManager;
     Obstacle obstacles;
     vector<PowerUp> powerups;
-    int score;
     int baseSpeed;
     int currentSpeed;
     bool gameOver;
@@ -626,22 +629,28 @@ private:
             }
         }
 
-        // Draw snake
-        const deque<Point> &body = snake->getBody();
-        for (size_t i = 0; i < body.size(); ++i)
-        {
-            if (body[i].x >= 0 && body[i].x < WIDTH && body[i].y >= 0 && body[i].y < HEIGHT)
+        // Draw snakes
+        for (const auto& p : players) {
+            const deque<Point> &body = p.snake->getBody();
+            for (size_t i = 0; i < body.size(); ++i)
             {
-                if (i == 0)
-                    screenBuffer[body[i].y + 1][body[i].x + 1] = 'O';
-                else
-                    screenBuffer[body[i].y + 1][body[i].x + 1] = 'o';
+                if (body[i].x >= 0 && body[i].x < WIDTH && body[i].y >= 0 && body[i].y < HEIGHT)
+                {
+                    if (i == 0)
+                        screenBuffer[body[i].y + 1][body[i].x + 1] = 'O';
+                    else
+                        screenBuffer[body[i].y + 1][body[i].x + 1] = 'o';
+                }
             }
         }
 
         // Update status lines
         stringstream ss1;
-        ss1 << "Score: " << score << " | High Score: " << highScoreManager.getHighScore();
+        ss1 << "Score: ";
+        for (size_t i = 0; i < players.size(); ++i) {
+            ss1 << "P" << (i+1) << ":" << players[i].score << " ";
+        }
+        ss1 << "| High Score: " << highScoreManager.getHighScore();
         screenBuffer[HEIGHT + 2] = ss1.str();
 
         stringstream ss2;
@@ -713,23 +722,24 @@ private:
 
     void processInput(char input)
     {
+        if (players.empty()) return;
         switch (input)
         {
         case 'w':
         case 'W':
-            snake->setDirection(0, -1);
+            players[0].snake->setDirection(0, -1);
             break;
         case 's':
         case 'S':
-            snake->setDirection(0, 1);
+            players[0].snake->setDirection(0, 1);
             break;
         case 'a':
         case 'A':
-            snake->setDirection(-1, 0);
+            players[0].snake->setDirection(-1, 0);
             break;
         case 'd':
         case 'D':
-            snake->setDirection(1, 0);
+            players[0].snake->setDirection(1, 0);
             break;
         case 'q':
         case 'Q':
@@ -740,81 +750,83 @@ private:
 
     bool checkCollision()
     {
-        Point head = snake->getHead();
+        for (auto& p : players) {
+            Point head = p.snake->getHead();
 
-        // Wall collision (ignore if invincible)
-        if (head.x < 0 || head.x >= WIDTH || head.y < 0 || head.y >= HEIGHT)
-        {
-            if (!invincibilityActive)
+            // Wall collision (ignore if invincible)
+            if (head.x < 0 || head.x >= WIDTH || head.y < 0 || head.y >= HEIGHT)
             {
-                SoundManager::playSound("collision");
-                return true;
+                if (!invincibilityActive)
+                {
+                    SoundManager::playSound("collision");
+                    return true;
+                }
+            }
+
+            // Self collision (ignore if invincible)
+            if (p.snake->checkSelfCollision())
+            {
+                if (!invincibilityActive)
+                {
+                    SoundManager::playSound("collision");
+                    return true;
+                }
+            }
+
+            // Obstacle collision (ignore if invincible)
+            if (obstacles.isObstacle(head))
+            {
+                if (!invincibilityActive)
+                {
+                    SoundManager::playSound("collision");
+                    return true;
+                }
             }
         }
-
-        // Self collision (ignore if invincible)
-        if (snake->checkSelfCollision())
-        {
-            if (!invincibilityActive)
-            {
-                SoundManager::playSound("collision");
-                return true;
-            }
-        }
-
-        // Obstacle collision (ignore if invincible)
-        if (obstacles.isObstacle(head))
-        {
-            if (!invincibilityActive)
-            {
-                SoundManager::playSound("collision");
-                return true;
-            }
-        }
-
         return false;
     }
 
     void checkFood()
     {
-        if (foodManager.checkAndRemoveFood(snake->getHead()))
-        {
-            snake->grow();
-            int points = doubleScoreActive ? 2 : 1;
-            score += points;
-            SoundManager::playSound("eat");
+        for (auto& p : players) {
+            if (foodManager.checkAndRemoveFood(p.snake->getHead()))
+            {
+                p.snake->grow();
+                int points = doubleScoreActive ? 2 : 1;
+                p.score += points;
+                SoundManager::playSound("eat");
 
-            // Spawn new food to maintain count
-            foodManager.spawnFood(WIDTH, HEIGHT, snake->getBody(), obstacles, powerups);
+                // Spawn new food to maintain count
+                foodManager.spawnFood(WIDTH, HEIGHT, players[0].snake->getBody(), obstacles, powerups);
+            }
         }
     }
 
     void checkPowerUp()
     {
-        Point head = snake->getHead();
-        for (auto &powerup : powerups)
-        {
-            if (powerup.isActive() && head == powerup.getPosition())
+        for (auto& p : players) {
+            Point head = p.snake->getHead();
+            for (auto &powerup : powerups)
             {
-                SoundManager::playSound("powerup");
-                applyPowerUp(powerup);
-                powerup.deactivate();
-
-                // Spawn new powerup after some delay
-                break;
+                if (powerup.isActive() && head == powerup.getPosition())
+                {
+                    SoundManager::playSound("powerup");
+                    applyPowerUp(powerup, p.snake);
+                    powerup.deactivate();
+                }
             }
         }
     }
 
-    void applyPowerUp(PowerUp &powerup)
+    void applyPowerUp(PowerUp &powerup, Snake* targetSnake)
     {
         switch (powerup.getType())
         {
         case SPEED_BOOST:
-            currentSpeed = baseSpeed * 2; // Faster
+            currentSpeed = baseSpeed / 2;
             break;
         case SLOW_DOWN:
-            currentSpeed = baseSpeed / 2; // Slower
+            currentSpeed = baseSpeed * 2;
             break;
         case SCORE_DOUBLE:
             doubleScoreActive = true;
@@ -825,7 +837,7 @@ private:
             invincibilityTimer = 100;
             break;
         case SHRINK:
-            snake->shrink();
+            targetSnake->shrink();
             break;
         }
     }
@@ -869,15 +881,16 @@ private:
     }
 
 public:
-    Game() : WIDTH(40), HEIGHT(25), snake(nullptr), foodManager(3), score(0),
+    Game() : WIDTH(40), HEIGHT(25), foodManager(3),
              baseSpeed(120000), currentSpeed(120000), gameOver(false),
              invincibilityActive(false), doubleScoreActive(false),
              invincibilityTimer(0), doubleScoreTimer(0) {}
 
     ~Game()
     {
-        if (snake)
-            delete snake;
+        for (auto& p : players) {
+            delete p.snake;
+        }
     }
 
     void run()
@@ -892,24 +905,29 @@ public:
         {
             getTerminalSize();
 
-            if (snake)
-                delete snake;
-            snake = new Snake(WIDTH / 2, HEIGHT / 2);
-            score = 0;
+            for (auto& p : players) delete p.snake;
+            players.clear();
+            
+            // Refactored: the number of snakes is controlled here
+            int numPlayers = 1; 
+            for (int i = 0; i < numPlayers; ++i) {
+                players.push_back({new Snake(WIDTH / 2, HEIGHT / 2), 0});
+            }
+
             gameOver = false;
             currentSpeed = baseSpeed;
             invincibilityActive = false;
             doubleScoreActive = false;
             powerups.clear();
 
-            obstacles.generateObstacles(WIDTH, HEIGHT, Point(WIDTH / 2, HEIGHT / 2));
-            foodManager.initializeFoods(WIDTH, HEIGHT, snake->getBody(), obstacles, powerups);
+            obstacles.generateObstacles(WIDTH, HEIGHT, players[0].snake->getHead());
+            foodManager.initializeFoods(WIDTH, HEIGHT, players[0].snake->getBody(), obstacles, powerups);
 
             // Spawn initial powerups
             for (int i = 0; i < 2; ++i)
             {
                 PowerUp pu;
-                pu.spawn(WIDTH, HEIGHT, snake->getBody(), obstacles.getPositions(),
+                pu.spawn(WIDTH, HEIGHT, players[0].snake->getBody(), obstacles.getPositions(),
                          foodManager.getFoodPositions());
                 powerups.push_back(pu);
             }
@@ -951,7 +969,9 @@ public:
                     processInput(input);
                 }
 
-                snake->move();
+                for (auto& p : players) {
+                    p.snake->move();
+                }
 
                 if (checkCollision())
                 {
@@ -968,7 +988,7 @@ public:
                 if (tickCounter % 150 == 0)
                 {
                     PowerUp pu;
-                    pu.spawn(WIDTH, HEIGHT, snake->getBody(), obstacles.getPositions(),
+                    pu.spawn(WIDTH, HEIGHT, players[0].snake->getBody(), obstacles.getPositions(),
                              foodManager.getFoodPositions());
                     powerups.push_back(pu);
 
@@ -982,14 +1002,20 @@ public:
                 usleep(currentSpeed);
             }
 
-            highScoreManager.saveHighScore(score);
+            int maxScore = 0;
+            for (const auto& p : players) {
+                if (p.score > maxScore) maxScore = p.score;
+            }
+            highScoreManager.saveHighScore(maxScore);
 
             // Game over screen
             clearScreen();
             cout << "=== GAME OVER ===" << endl;
-            cout << "Final Score: " << score << endl;
+            for (size_t i = 0; i < players.size(); ++i) {
+                cout << "P" << (i+1) << " Final Score: " << players[i].score << endl;
+            }
             cout << "High Score: " << highScoreManager.getHighScore() << endl;
-            if (score == highScoreManager.getHighScore() && score > 0)
+            if (maxScore == highScoreManager.getHighScore() && maxScore > 0)
             {
                 cout << "🎉 NEW HIGH SCORE! 🎉" << endl;
             }
